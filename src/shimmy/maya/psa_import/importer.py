@@ -15,9 +15,13 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
+#https://github.com/gildor2/UModel/blob/master/Exporters/Psk.h
 
-
-# https://github.com/gildor2/UModel/blob/master/Exporters/Psk.h
+""" This module imports psa animation as maya keyframes
+referenced  from https://github.com/Befzz/blender3d_import_psk_psa
+author: Jefri Haryono
+website : https://jefriyeh.com
+"""
 
 
 from struct import unpack, unpack_from, Struct
@@ -35,9 +39,6 @@ Matrix = om2.MMatrix
 Angle = om2.MAngle
 
 
-def error_callback(msg):
-    print(msg)
-
 
 # since names have type ANSICHAR(signed char) - using cp1251(or 'ASCII'?)
 def util_bytes_to_str(in_bytes):
@@ -47,6 +48,8 @@ def util_bytes_to_str(in_bytes):
 class PSA_Joint(object):
     def __init__(self, joint):
         self.name = joint
+        self.default_translate = [0,0,0]
+        self.default_rotate = [0,0,0]
 
 
 class ChunkData(object):
@@ -72,20 +75,17 @@ class PSA_Joint_Map(object):
         self.PsaBonesToProcess = []
         self.BoneNotFoundList = []
 
-
 class PSA_Anim(object):
     def __init__(self):
         self.Raw_Key_Nums = None
         self.Action_List = []
 
-
 class PSA_Keyframes(object):
     def __init__(self):
         self.Raw_Key_List = None
 
-
 class PSA_Reader(object):
-    FILE_HEADER = b'ANIMHEAD\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+    FILE_HEADER =  b'ANIMHEAD\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
 
     @classmethod
     def is_header_valid(cls, chunk_data):
@@ -94,17 +94,21 @@ class PSA_Reader(object):
             return False
         return True
 
+
     file_ext = 'psa'
 
-    def __init__(self, psaPath, jointData, first_frame=11, easin_frames=10):
+    def __init__(self, psaPath, jointData, first_frame=11, easin_frames=10, translate_value_multiplier=100):
         self.first_frame = first_frame
         self.easin_frames = easin_frames
         self.filePath = psaPath
         self.jointData = jointData
+        self.translate_value_multiplier = translate_value_multiplier
 
         self.joints = self.jointData.keys()
 
-        self.fd = open(self.filePath, "rb")
+        self.fd = open(self.filePath,"rb")
+
+
 
     def read_psa(self):
         header = self.read_header()
@@ -114,15 +118,13 @@ class PSA_Reader(object):
         self.fd.close()
         self.import_keys(joint_map, anim_map, keyframe_map)
 
+    @timeIt("prefix = apply key frames: ")
     def import_keys(self, jm, am, km):
         raw_key_index = 0
         gen_name_part = self.filePath.namebase
 
         for counter, (action_name, group_name, total_bones, num_raw_frames) in enumerate(am.Action_List):
-
-            # continue
-
-            # ref_time = time.process_time()
+            print counter, action_name, group_name, total_bones, num_raw_frames
 
             if group_name != 'None':
                 action_name = "(%s) %s" % (group_name, action_name)
@@ -136,19 +138,25 @@ class PSA_Reader(object):
             maxframes = 99999999
 
             # create all fcurves(for all bones) for an action
-            # for pose_bone in armature_obj.pose.bones:
             for psa_bone in jm.PsaBonesToProcess:
                 if psa_bone is None:
                     continue
 
                 joint = psa_bone.name
-                # print "joint: ", joint
 
                 default_frame = self.first_frame - self.easin_frames
 
                 mc.setKeyframe(joint, t=default_frame, at='rx')
                 mc.setKeyframe(joint, t=default_frame, at='ry')
                 mc.setKeyframe(joint, t=default_frame, at='rz')
+
+                mc.setKeyframe(joint, t=default_frame, at='tx')
+                mc.setKeyframe(joint, t=default_frame, at='ty')
+                mc.setKeyframe(joint, t=default_frame, at='tz')
+
+                psa_bone.default_translate = mc.getAttr(joint+".translate")[0]
+                psa_bone.default_rotate = mc.getAttr(joint+".rotate")[0]
+
 
             for i in range(0, min(maxframes, num_raw_frames)):
                 # raw_key_index+= total_bones * 5 #55
@@ -163,10 +171,9 @@ class PSA_Reader(object):
                     joint = psa_bone.name
 
                     p_pos = km.Raw_Key_List[raw_key_index][0]
-                    p_quat = km.Raw_Key_List[raw_key_index][1]
 
-                    # print "p_pos", p_pos
-                    # print "p_quat", p_quat
+
+                    p_quat = km.Raw_Key_List[raw_key_index][1]
 
                     quat = Quaternion(p_quat).conjugate()
                     rotate = quat.asEulerRotation()
@@ -175,21 +182,72 @@ class PSA_Reader(object):
 
                     rotX, rotY, rotZ = Angle(x).asDegrees(), Angle(y).asDegrees(), Angle(z).asDegrees()
 
-                    currFrame = i + self.first_frame
+                    currFrame = i+self.first_frame
+                    isRoot = False
+                    # check if it's root joint. if so, apply translation
+                    parent = mc.listRelatives(joint,p=1,f=1)
+                    if not parent or mc.nodeType(parent[0]) != "joint":
+                        isRoot = True
 
-                    mc.setKeyframe(joint, t=currFrame, v=rotX, at='rx')
-                    mc.setKeyframe(joint, t=currFrame, v=rotY, at='ry')
-                    mc.setKeyframe(joint, t=currFrame, v=rotZ, at='rz')
+                    # if not parent or mc.nodeType(parent[0]) != "joint":
+                    multiplier = self.translate_value_multiplier
+                    if isRoot:
+                        # ignore rotation for root.
+
+                        t = [0,0,0]
+                        t[0] = p_pos[0] * multiplier
+                        t[1] = p_pos[2] * multiplier
+                        t[2] = p_pos[1] * -1 * multiplier
+                        # p_pos = t
+
+                        mc.setKeyframe(joint, t=currFrame, v=t[0], at='tx')
+                        mc.setKeyframe(joint, t=currFrame, v=t[1], at='ty')
+                        mc.setKeyframe(joint, t=currFrame, v=t[2], at='tz')
+
+                    if not isRoot:
+                        t = [0,0,0]
+                        t[0] = p_pos[0] * multiplier
+                        t[1] = p_pos[1] * multiplier
+                        t[2] = p_pos[2] * multiplier
+
+                        mc.setKeyframe(joint, t=currFrame, v=t[0], at='tx')
+                        mc.setKeyframe(joint, t=currFrame, v=t[1], at='ty')
+                        mc.setKeyframe(joint, t=currFrame, v=t[2], at='tz')
+
+
+                        mc.setKeyframe(joint, t=currFrame, v=rotX, at='rx')
+                        mc.setKeyframe(joint, t=currFrame, v=rotY, at='ry')
+                        mc.setKeyframe(joint, t=currFrame, v=rotZ, at='rz')
+
                     raw_key_index += 1
+
+
+            # apply post processing
+            for psa_bone in jm.PsaBonesToProcess:
+                if psa_bone:
+                    joint = psa_bone.name
+
+                    # apply euler filter
+                    attrs = ["rx","ry","rz"]
+                    curves = []
+                    for attr in attrs:
+                        conns = mc.listConnections(joint+"."+attr,s=1,d=0)
+                        animCurve = next((each for each in conns if "animCurve" in mc.nodeType(each)), None)
+                        if animCurve:
+                            curves.append(animCurve)
+                    if curves:
+                        mc.filterCurve(*curves)
 
             raw_key_index += (num_raw_frames - min(maxframes, num_raw_frames)) * total_bones
 
+    @timeIt("prefix = read header time: ")
     def read_header(self):
         chunkData = ChunkData.read(self.fd)
         if not self.is_header_valid(chunkData):
             raise ValueError("HEADER ERROR")
         return chunkData
 
+    @timeIt("prefix = read joints time: ")
     def read_joints(self):
         skeleton_bones_lowered = {}
         for bone_name in self.joints:
@@ -222,6 +280,7 @@ class PSA_Reader(object):
         jd.BoneNotFoundList = BoneNotFoundList
         return jd
 
+    @timeIt("prefix = read anim time: ")
     def read_anim(self):
         data = ChunkData.read(self.fd)
         Raw_Key_Nums = 0
@@ -249,13 +308,14 @@ class PSA_Reader(object):
             Action_List[counter] = (action_name, group_name, total_bones, num_raw_frames)
 
         ad = PSA_Anim()
-        ad.Raw_Key_Nums = Raw_Key_Nums
+        ad.Raw_Key_Nums=Raw_Key_Nums
         ad.Action_List = Action_List
 
         return ad
 
+    @timeIt("prefix = keyframe time: ")
     def read_key_frames(self):
-        bScaleDown = True
+        bScaleDown= True
         data = ChunkData.read(self.fd)
         Raw_Key_List = [None] * data.chunk_datacount
 
@@ -280,11 +340,22 @@ class PSA_Reader(object):
         return km
 
 
-def psa_import(psa_file=None, joint_data_map=None, joints=None):
+
+def custom_remap_translation(translation, multiplier=100):
+    t = translation
+    t[0] = translation[0]
+    t[1] = translation[2] * multiplier
+    t[2] = translation[1] * multiplier * -1
+    translation = t
+
+    return translation
+
+
+def psa_import(psa_file=None, joint_data_map=None, joints=None, first_frame=11, easin_frames=10):
     if not joint_data_map:
         joint_data_map = get_joint_data_map(joints=joints)
 
     psa_file = Path(psa_file)
 
-    reader = PSA_Reader(psa_file, joint_data_map)
+    reader = PSA_Reader(psa_file, joint_data_map, first_frame=first_frame, easin_frames=easin_frames, translate_value_multiplier=100)
     reader.read_psa()
