@@ -6,11 +6,15 @@ import qqt.gui as qui
 from qqt.style import dark_palette_fusion
 from genlib.path import Path
 
+# wip module
+# incomplete yet
+
 class FileCopier(QtWidgets.QWidget):
     def __init__(self, *args, **kwargs):
         super(FileCopier, self).__init__(*args, **kwargs)
         self.pakRoot = None
         self.pakBat = None
+        self.modDir = None
 
         self.setWindowTitle("Pak File Copier")
 
@@ -68,7 +72,10 @@ class FileCopier(QtWidgets.QWidget):
         os.system(pakCmd)
 
     def copyPak(self):
-        pass
+        sourcePath = self.pakRoot / "NewMod.pak"
+        targetPath = self.modDir / "NewMod.Pak"
+
+        sourcePath.copy(targetPath)
 
     def setSourceRoot(self, path):
         self.sourceRoot = path
@@ -156,11 +163,13 @@ class FileCopier(QtWidgets.QWidget):
             #     shutil.rmtree(fpath)
 
     def setPakRoot(self, pakRoot):
-        self.pakRoot = pakRoot
+        self.pakRoot = Path(pakRoot)
 
     def setPakBat(self, pakBat):
-        self.pakBat = pakBat
+        self.pakBat = Path(pakBat)
 
+    def setModDir(self, modDir):
+        self.modDir = Path(modDir)
 
 class FileView(QtWidgets.QTreeView):
     def __init__(self, *args,**kwargs):
@@ -369,6 +378,6 @@ if __name__ == '__main__':
 
     # ui.showMaximized()
 
-
+    ui.setModDir(r"E:\games\steam\steamapps\common\Tales of Arise\Arise\Content\Paks\~mods")
 
     sys.exit(app.exec_())
