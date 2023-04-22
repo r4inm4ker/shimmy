@@ -29,7 +29,7 @@ from struct import unpack, unpack_from, Struct
 import maya.cmds as mc
 import maya.api.OpenMaya as om2
 
-from shimmy.lib import Path
+from shimmy.lib import Path, timeIt
 
 from .funcs import get_joint_data_map
 
