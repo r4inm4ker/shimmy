@@ -124,8 +124,6 @@ class PSA_Reader(object):
         gen_name_part = self.filePath.namebase
 
         for counter, (action_name, group_name, total_bones, num_raw_frames) in enumerate(am.Action_List):
-            print counter, action_name, group_name, total_bones, num_raw_frames
-
             if group_name != 'None':
                 action_name = "(%s) %s" % (group_name, action_name)
             action_name = "(%s) %s" % (gen_name_part, action_name)
